@@ -24,14 +24,28 @@ export default class Install extends Command {
 
       let binaryPath = execSync('which localrun', {encoding: 'utf-8'}).trim()
       
-      if (existsSync(binaryPath)) {
+      // Resolve symlinks recursively (macOS compatible)
+      let resolvedPath = binaryPath
+      while (existsSync(resolvedPath)) {
         try {
-          const realPath = execSync(`readlink -f "${binaryPath}"`, {encoding: 'utf-8'}).trim()
-          if (realPath) binaryPath = realPath
+          const linkTarget = execSync(`readlink "${resolvedPath}"`, {encoding: 'utf-8'}).trim()
+          if (!linkTarget) break
+          
+          // Handle relative paths
+          if (linkTarget.startsWith('/')) {
+            resolvedPath = linkTarget
+          } else {
+            const dir = execSync(`dirname "${resolvedPath}"`, {encoding: 'utf-8'}).trim()
+            resolvedPath = join(dir, linkTarget)
+          }
         } catch {
-          // Not a symlink, use original path
+          break // Not a symlink
         }
       }
+      binaryPath = resolvedPath
+
+      // Get node path
+      const nodePath = execSync('which node', {encoding: 'utf-8'}).trim()
 
       // Create LaunchAgent plist
       const plistPath = join(homedir(), 'Library', 'LaunchAgents', 'com.localrun.agent.plist')
@@ -43,6 +57,7 @@ export default class Install extends Command {
     <string>com.localrun.agent</string>
     <key>ProgramArguments</key>
     <array>
+        <string>${nodePath}</string>
         <string>${binaryPath}</string>
         <string>serve</string>
         <string>--port</string>

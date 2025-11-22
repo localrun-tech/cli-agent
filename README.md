@@ -16,9 +16,11 @@ curl -fsSL https://raw.githubusercontent.com/localrun-tech/cli-agent/main/agent/
 ### For Developers
 
 ```bash
-make install    # Install dependencies
-make build      # Compile TypeScript
-make dev        # Link for development
+make {os}-install    # Install dependencies
+make {os}-build      # Compile TypeScript
+make {os}-dev        # Link for development
+make {os}-pack       #
+make {os}-clean      # Clean local install files and dependencies
 ```
 
 ## Commands

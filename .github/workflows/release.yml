@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: cd macos && npm ci
+
+      - name: Build TypeScript
+        run: cd macos && npm run build
+
+      - name: Generate manifest
+        run: cd macos && npx oclif manifest
+
+      - name: Pack binaries
+        run: cd macos && npx oclif pack tarballs --targets darwin-arm64,darwin-x64
+
+      - name: Rename artifacts
+        run: |
+          cd macos/dist
+          mv localrun-*-darwin-arm64.tar.gz localrun-darwin-arm64.tar.gz
+          mv localrun-*-darwin-arm64.tar.xz localrun-darwin-arm64.tar.xz
+          mv localrun-*-darwin-x64.tar.gz localrun-darwin-x64.tar.gz
+          mv localrun-*-darwin-x64.tar.xz localrun-darwin-x64.tar.xz
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            macos/dist/localrun-darwin-arm64.tar.gz
+            macos/dist/localrun-darwin-arm64.tar.xz
+            macos/dist/localrun-darwin-x64.tar.gz
+            macos/dist/localrun-darwin-x64.tar.xz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

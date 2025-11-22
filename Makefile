@@ -4,23 +4,23 @@ help:
 	@echo "LocalRun Agent - Build Commands"
 	@echo ""
 	@echo "  make install    Install dependencies"
-	@echo "  make build      Compile TypeScript"
+	@echo "  make build-mac  Compile TypeScript"
 	@echo "  make pack       Build standalone binaries (arm64 + x64)"
 	@echo "  make dev        Link for development"
 	@echo "  make clean      Remove build artifacts"
 	@echo ""
 
-install:
+macos-install:
 	cd macos && npm install
 
-build:
+macos-build:
 	cd macos && npm run build
 
-pack: build
+macos-pack: macos-build
 	cd macos && npx oclif pack tarballs --targets darwin-arm64,darwin-x64
 
-dev: build
+macos-dev: macos-build
 	cd macos && npm link
 
-clean:
+macos-clean:
 	cd macos && rm -rf dist tmp node_modules *.tgz *.tar.gz *.tar.xz oclif.manifest.json

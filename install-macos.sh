@@ -43,11 +43,16 @@ fi
 echo "Extracting..."
 tar -xzf localrun.tar.gz
 
-# Install binary
-echo "Installing to $INSTALL_DIR..."
+# Install binary and dependencies
+LOCALRUN_HOME="/usr/local/lib/localrun"
+echo "Installing to $LOCALRUN_HOME..."
+sudo rm -rf "$LOCALRUN_HOME"
+sudo mkdir -p "$LOCALRUN_HOME"
+sudo cp -R localrun/* "$LOCALRUN_HOME/"
+
+echo "Creating symlink in $INSTALL_DIR..."
 sudo mkdir -p "$INSTALL_DIR"
-sudo cp localrun/bin/localrun "$INSTALL_DIR/localrun"
-sudo chmod +x "$INSTALL_DIR/localrun"
+sudo ln -sf "$LOCALRUN_HOME/bin/localrun" "$INSTALL_DIR/localrun"
 
 # Cleanup
 cd -
