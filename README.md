@@ -9,18 +9,9 @@ Currently supports: **macOS** (Apple Silicon & Intel)
 ### For Users
 
 **macOS:**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/localrun-tech/cli-agent/main/agent/install-macos.sh | bash
-```
-
-### For Developers
-
-```bash
-make {os}-install    # Install dependencies
-make {os}-build      # Compile TypeScript
-make {os}-dev        # Link for development
-make {os}-pack       #
-make {os}-clean      # Clean local install files and dependencies
 ```
 
 ## Commands
@@ -34,6 +25,16 @@ localrun logs       # View logs
 localrun logs -f    # Follow logs
 localrun serve      # Start HTTP server
 localrun uninstall  # Remove service
+```
+
+### For Developers
+
+```bash
+make {os}-install    # Install dependencies
+make {os}-build      # Compile TypeScript
+make {os}-dev        # Link for development
+make {os}-pack       # Create a binari executable
+make {os}-clean      # Clean local install files and dependencies
 ```
 
 ## API Endpoints
@@ -53,6 +54,7 @@ make pack    # Build standalone binaries for arm64 + x64
 ```
 
 Generates:
+
 - `localrun-darwin-arm64.tar.gz` (Apple Silicon)
 - `localrun-darwin-x64.tar.gz` (Intel)
 
