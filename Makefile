@@ -3,11 +3,11 @@
 help:
 	@echo "LocalRun Agent - Build Commands"
 	@echo ""
-	@echo "  make install    Install dependencies"
-	@echo "  make build-mac  Compile TypeScript"
-	@echo "  make pack       Build standalone binaries (arm64 + x64)"
-	@echo "  make dev        Link for development"
-	@echo "  make clean      Remove build artifacts"
+	@echo "  make macos-install   Install dependencies"
+	@echo "  make macos-build     Compile TypeScript"
+	@echo "  make macos-pack      Build standalone binaries (arm64 + x64)"
+	@echo "  make macos-dev       Link for development"
+	@echo "  make macos-clean     Remove build artifacts"
 	@echo ""
 
 macos-install:
