@@ -1,13 +1,16 @@
-import {Command, Flags} from '@oclif/core'
+import { Command, Flags } from '@oclif/core'
 import express from 'express'
-import {homedir} from 'os'
-import {join} from 'path'
-import {writeFileSync} from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
+import { writeFileSync } from 'fs'
 import chalk from 'chalk'
-import {getHostInfo} from '../lib/system/host'
-import {getOpenPorts} from '../lib/system/ports'
-import {getProcesses} from '../lib/system/processes'
-import {getDockerContainers} from '../lib/system/docker'
+import { getHostInfo } from '../lib/system/host'
+import { getOpenPorts } from '../lib/system/ports'
+import { getProcesses } from '../lib/system/processes'
+import { getDockerContainers } from '../lib/system/docker'
+import WebSocket = require('ws')
+import * as pty from 'node-pty'
+import * as os from 'os'
 
 export default class Serve extends Command {
   static description = 'Start agent HTTP server (used by LaunchAgent)'
@@ -18,12 +21,13 @@ export default class Serve extends Command {
   ]
 
   static flags = {
-    port: Flags.integer({char: 'p', description: 'Server port', default: 47777}),
-    host: Flags.string({char: 'h', description: 'Server host', default: '127.0.0.1'}),
+    port: Flags.integer({ char: 'p', description: 'Server port', default: 47777 }),
+    host: Flags.string({ char: 'h', description: 'Server host', default: '127.0.0.1' }),
+    wsUrl: Flags.string({ description: 'Backend WebSocket URL', default: 'ws://localhost:8000/ws/terminal/agent' }),
   }
 
   async run(): Promise<void> {
-    const {flags} = await this.parse(Serve)
+    const { flags } = await this.parse(Serve)
 
     const app = express()
     app.use(express.json())
@@ -54,34 +58,63 @@ export default class Serve extends Command {
         const info = await getHostInfo()
         res.json(info)
       } catch (error) {
-        res.status(500).json({error: (error as Error).message})
+        res.status(500).json({ error: (error as Error).message })
       }
     })
 
     app.get('/api/host/ports', async (req, res) => {
       try {
         const ports = await getOpenPorts()
-        res.json({ports})
+        res.json({ ports })
       } catch (error) {
-        res.status(500).json({error: (error as Error).message})
+        res.status(500).json({ error: (error as Error).message })
       }
     })
 
     app.get('/api/host/processes', async (req, res) => {
       try {
         const processes = await getProcesses()
-        res.json({processes})
+        res.json({ processes })
       } catch (error) {
-        res.status(500).json({error: (error as Error).message})
+        res.status(500).json({ error: (error as Error).message })
       }
     })
 
     app.get('/api/docker/containers', async (req, res) => {
       try {
         const containers = await getDockerContainers()
-        res.json({containers})
+        res.json({ containers })
       } catch (error) {
-        res.status(500).json({error: (error as Error).message})
+        res.status(500).json({ error: (error as Error).message })
+      }
+    })
+
+    app.post('/api/update', async (req, res) => {
+      const { path } = req.body
+      const projectPath = path || process.cwd()
+      const scriptPath = join(projectPath, 'update.sh')
+
+      this.log(`Update requested for path: ${projectPath}`)
+
+      try {
+        const { exec } = require('child_process')
+        const { existsSync } = require('fs')
+
+        if (!existsSync(scriptPath)) {
+          return res.status(404).json({ error: `Update script not found at ${scriptPath}` })
+        }
+
+        // Execute update script
+        exec(`"${scriptPath}"`, { cwd: projectPath }, (error: any, stdout: string, stderr: string) => {
+          if (error) {
+            this.log(`Update failed: ${error.message}`)
+            return res.status(500).json({ error: error.message, stdout, stderr })
+          }
+          this.log(`Update successful`)
+          res.json({ status: 'success', stdout, stderr })
+        })
+      } catch (error) {
+        res.status(500).json({ error: (error as Error).message })
       }
     })
 
@@ -96,6 +129,224 @@ export default class Serve extends Command {
         pid: process.pid,
         started_at: new Date().toISOString(),
       }, null, 2))
+
+      // Start heartbeat
+      this.startHeartbeat()
+
+      // Connect to Terminal Backend
+      this.connectToTerminalBackend(flags.wsUrl)
     })
+  }
+
+  connectToTerminalBackend(url: string) {
+    this.log(`Connecting to Terminal Backend: ${url}...`)
+    const ws = new WebSocket(url)
+
+    ws.on('open', () => {
+      this.log('Connected to Terminal Backend!')
+
+      // Register agent
+      ws.send(JSON.stringify({ type: 'register', role: 'agent' }))
+
+      this.spawnShell(ws)
+    })
+
+    ws.on('close', () => {
+      // Silent retry
+      setTimeout(() => this.connectToTerminalBackend(url), 5000)
+    })
+
+    ws.on('error', (error: Error) => {
+      // Silent error
+    })
+  }
+
+  spawnShell(ws: WebSocket) {
+    const shell = process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : 'bash')
+
+    const ptyProcess = pty.spawn(shell, [], {
+      name: 'xterm-256color',
+      cols: 80,
+      rows: 24,
+      cwd: homedir(),
+      env: { ...process.env, TERM: 'xterm-256color' } as any,
+    })
+
+    // Suppress Zsh partial line indicator
+    ptyProcess.write('export PROMPT_EOL_MARK=""\r')
+    ptyProcess.write('clear\r')
+
+    // Read from PTY and send to WS
+    ptyProcess.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'output',
+          data: data,
+        }))
+      }
+    })
+
+    // Read from WS and write to PTY
+    ws.on('message', (message) => {
+      try {
+        const msg = JSON.parse(message.toString())
+
+        if (msg.type === 'input') {
+          ptyProcess.write(msg.data)
+        } else if (msg.type === 'resize') {
+          ptyProcess.resize(msg.cols, msg.rows)
+        }
+      } catch (error) {
+        // Ignore parse errors
+      }
+    })
+
+    // Cleanup
+    ws.on('close', () => {
+      ptyProcess.kill()
+    })
+  }
+
+  async startHeartbeat() {
+    const sendHeartbeat = async () => {
+      try {
+        const stats = await this.getSystemStats()
+        await fetch('http://localhost:8000/agent/heartbeat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(stats),
+        })
+      } catch (error) {
+        // Silent error to avoid log spam
+      }
+    }
+
+    // Send immediately then every 5s
+    sendHeartbeat()
+    setInterval(sendHeartbeat, 5000)
+  }
+
+  async getSystemStats() {
+    const hostInfo = await getHostInfo()
+    const cpuPercent = await this.getCpuUsage()
+    const diskInfo = this.getDiskInfo()
+    const memInfo = await this.getMemoryUsage()
+
+    return {
+      os_name: hostInfo.platform === 'darwin' ? 'macOS' : hostInfo.platform,
+      os_version: String(hostInfo.platform), // os.release() would be better but not in HostInfo
+      cpu_cores: hostInfo.cpus,
+      cpu_percent: cpuPercent,
+      memory_gb: memInfo.gb,
+      memory_percent: memInfo.percent,
+      disk_gb: Number(diskInfo.totalGb.toFixed(2)),
+      disk_percent: Number(diskInfo.percent.toFixed(2)),
+      local_ip: hostInfo.localIP,
+      timestamp: new Date().toISOString(),
+    }
+  }
+
+  async getMemoryUsage(): Promise<{ gb: number, percent: number }> {
+    const { platform, totalmem, freemem } = require('os')
+
+    if (platform() === 'darwin') {
+      try {
+        const { execSync } = require('child_process')
+        const output = execSync('vm_stat').toString()
+        const lines = output.split('\n')
+
+        let pageSize = 4096 // Default fallback
+        const pageSizeMatch = lines[0].match(/page size of (\d+) bytes/)
+        if (pageSizeMatch) {
+          pageSize = parseInt(pageSizeMatch[1], 10)
+        }
+
+        let active = 0
+        let wired = 0
+        let compressed = 0
+
+        for (const line of lines) {
+          if (line.includes('Pages active:')) active = parseInt(line.split(':')[1].trim().replace('.', ''), 10)
+          if (line.includes('Pages wired down:')) wired = parseInt(line.split(':')[1].trim().replace('.', ''), 10)
+          if (line.includes('Pages occupied by compressor:')) compressed = parseInt(line.split(':')[1].trim().replace('.', ''), 10)
+        }
+
+        const usedBytes = (active + wired + compressed) * pageSize
+        const totalBytes = totalmem()
+
+        return {
+          gb: Number((usedBytes / (1024 * 1024 * 1024)).toFixed(2)),
+          percent: Number(((usedBytes / totalBytes) * 100).toFixed(2))
+        }
+      } catch (e) {
+        // Fallback to standard if vm_stat fails
+      }
+    }
+
+    // Default Linux/Windows behavior
+    const total = totalmem()
+    const free = freemem()
+    const used = total - free
+    return {
+      gb: Number((used / (1024 * 1024 * 1024)).toFixed(2)),
+      percent: Number(((used / total) * 100).toFixed(2))
+    }
+  }
+
+  getDiskInfo() {
+    try {
+      const { execSync } = require('child_process')
+      const { platform } = require('os')
+
+      // On macOS, check /System/Volumes/Data for actual user disk usage
+      let cmd = 'df -k /'
+      if (platform() === 'darwin') {
+        cmd = 'df -k /System/Volumes/Data'
+      }
+
+      const output = execSync(cmd).toString()
+      const lines = output.trim().split('\n')
+      if (lines.length >= 2) {
+        const parts = lines[1].split(/\s+/)
+        // Filesystem 1024-blocks Used Available Capacity iused ifree %iused Mounted on
+        if (parts.length >= 5) {
+          const totalKb = parseInt(parts[1], 10)
+          const capacityStr = parts[4] // "58%"
+          const percent = parseInt(capacityStr.replace('%', ''), 10)
+          const totalGb = totalKb / (1024 * 1024)
+          return { totalGb, percent }
+        }
+      }
+    } catch {
+      // Fallback
+    }
+    return { totalGb: 0, percent: 0 }
+  }
+
+  async getCpuUsage(): Promise<number> {
+    const { cpus } = require('os')
+    const startCpus = cpus()
+
+    await new Promise(resolve => setTimeout(resolve, 500))
+
+    const endCpus = cpus()
+    let idle = 0
+    let total = 0
+
+    for (let i = 0; i < startCpus.length; i++) {
+      const start = startCpus[i].times
+      const end = endCpus[i].times
+
+      const startTotal = start.user + start.nice + start.sys + start.idle + start.irq
+      const endTotal = end.user + end.nice + end.sys + end.idle + end.irq
+
+      const startIdle = start.idle
+      const endIdle = end.idle
+
+      total += endTotal - startTotal
+      idle += endIdle - startIdle
+    }
+
+    return Number((100 - (idle / total) * 100).toFixed(2))
   }
 }
