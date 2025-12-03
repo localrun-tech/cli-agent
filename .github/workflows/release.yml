@@ -1,52 +1,49 @@
 name: Release
 
 on:
-  release:
-    types: [created]
-
-permissions:
-  contents: write
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   build:
-    runs-on: macos-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            command: pack:tarballs
+          - os: macos-latest
+            platform: macos
+            command: pack:macos
+          - os: windows-latest
+            platform: win
+            command: pack:win
 
-      - name: Setup Node.js
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: agent/package-lock.json
 
-      - name: Install dependencies
-        run: cd macos && npm ci
+      - name: Install Dependencies
+        working-directory: agent
+        run: npm ci
 
-      - name: Build TypeScript
-        run: cd macos && npm run build
+      - name: Build and Pack
+        working-directory: agent
+        run: npm run ${{ matrix.command }}
 
-      - name: Generate manifest
-        run: cd macos && npx oclif manifest
-
-      - name: Pack binaries
-        run: cd macos && npx oclif pack tarballs --targets darwin-arm64,darwin-x64
-
-      - name: Rename artifacts
-        run: |
-          cd macos/dist
-          mv localrun-*-darwin-arm64.tar.gz localrun-darwin-arm64.tar.gz
-          mv localrun-*-darwin-arm64.tar.xz localrun-darwin-arm64.tar.xz
-          mv localrun-*-darwin-x64.tar.gz localrun-darwin-x64.tar.gz
-          mv localrun-*-darwin-x64.tar.xz localrun-darwin-x64.tar.xz
-
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v1
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            macos/dist/localrun-darwin-arm64.tar.gz
-            macos/dist/localrun-darwin-arm64.tar.xz
-            macos/dist/localrun-darwin-x64.tar.gz
-            macos/dist/localrun-darwin-x64.tar.xz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: localrun-${{ matrix.platform }}
+          path: agent/dist/*
+          if-no-files-found: warn

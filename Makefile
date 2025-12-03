@@ -1,26 +1,24 @@
-.DEFAULT_GOAL := help
-
 help:
 	@echo "LocalRun Agent - Build Commands"
 	@echo ""
-	@echo "  make macos-install   Install dependencies"
-	@echo "  make macos-build     Compile TypeScript"
-	@echo "  make macos-pack      Build standalone binaries (arm64 + x64)"
-	@echo "  make macos-dev       Link for development"
-	@echo "  make macos-clean     Remove build artifacts"
+	@echo "  make install         Install dependencies"
+	@echo "  make build           Compile TypeScript"
+	@echo "  make pack            Build standalone binaries (all platforms)"
+	@echo "  make dev             Link for development"
+	@echo "  make clean           Remove build artifacts"
 	@echo ""
 
-macos-install:
-	cd macos && npm install
+install:
+	cd agent && npm install
 
-macos-build:
-	cd macos && npm run build
+build:
+	cd agent && npm run build
 
-macos-pack: macos-build
-	cd macos && npx oclif pack tarballs --targets darwin-arm64,darwin-x64
+pack: build
+	cd agent && npx oclif pack tarballs --targets darwin-arm64,darwin-x64,linux-arm64,linux-x64,win32-x64
 
-macos-dev: macos-build
-	cd macos && npm link
+dev: build
+	cd agent && npm link
 
-macos-clean:
-	cd macos && rm -rf dist tmp node_modules *.tgz *.tar.gz *.tar.xz oclif.manifest.json
+clean:
+	cd agent && rm -rf dist tmp node_modules *.tgz *.tar.gz *.tar.xz oclif.manifest.json

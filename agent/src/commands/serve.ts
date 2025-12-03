@@ -11,6 +11,7 @@ import { getDockerContainers } from '../lib/system/docker'
 import WebSocket = require('ws')
 import * as pty from 'node-pty'
 import * as os from 'os'
+import { Scanner } from '../lib/scanner'
 
 export default class Serve extends Command {
   static description = 'Start agent HTTP server (used by LaunchAgent)'
@@ -195,6 +196,17 @@ export default class Serve extends Command {
           ptyProcess.write(msg.data)
         } else if (msg.type === 'resize') {
           ptyProcess.resize(msg.cols, msg.rows)
+        } else if (msg.type === 'scan_request') {
+          this.log('Starting port scan...')
+          const scanner = new Scanner()
+          scanner.scan('127.0.0.1').then(results => {
+            this.log(`Scan complete. Found ${results.length} open ports.`)
+            ws.send(JSON.stringify({
+              type: 'scan_result',
+              requestId: msg.requestId,
+              data: results
+            }))
+          })
         }
       } catch (error) {
         // Ignore parse errors
@@ -298,6 +310,60 @@ export default class Serve extends Command {
       const { execSync } = require('child_process')
       const { platform } = require('os')
 
+      if (platform() === 'win32') {
+        // Windows implementation using wmic
+        const output = execSync('wmic logicaldisk get size,freespace,caption').toString()
+        const lines = output.trim().split('\n')
+
+        let totalBytes = 0
+        let freeBytes = 0
+
+        // Skip header and parse lines
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim()
+          if (!line) continue
+
+          // Format: Caption FreeSpace Size
+          // Example: C: 100000 200000
+          const parts = line.split(/\s+/)
+          if (parts.length >= 3) {
+            // wmic output is usually: Caption FreeSpace Size
+            // But we need to be careful with column order if we didn't specify format csv
+            // The command 'wmic logicaldisk get size,freespace,caption' output order depends on implementation but usually alphabetical columns?
+            // Actually wmic output is fixed width usually.
+            // Let's use a safer command: wmic logicaldisk where "DeviceID='C:'" get FreeSpace,Size /value
+
+            // Simpler approach for C: drive which is usually the main one
+            try {
+              const cDrive = execSync('wmic logicaldisk where "DeviceID=\'C:\'" get FreeSpace,Size /value').toString()
+              // Output format:
+              // FreeSpace=12345
+              // Size=67890
+
+              const freeMatch = cDrive.match(/FreeSpace=(\d+)/)
+              const sizeMatch = cDrive.match(/Size=(\d+)/)
+
+              if (freeMatch && sizeMatch) {
+                const free = parseInt(freeMatch[1], 10)
+                const size = parseInt(sizeMatch[1], 10)
+                const used = size - free
+
+                const totalGb = size / (1024 * 1024 * 1024)
+                const percent = (used / size) * 100
+
+                return {
+                  totalGb: Number(totalGb.toFixed(2)),
+                  percent: Number(percent.toFixed(2))
+                }
+              }
+            } catch (e) {
+              // Fallback or ignore
+            }
+          }
+        }
+        return { totalGb: 0, percent: 0 }
+      }
+
       // On macOS, check /System/Volumes/Data for actual user disk usage
       let cmd = 'df -k /'
       if (platform() === 'darwin') {
@@ -314,7 +380,10 @@ export default class Serve extends Command {
           const capacityStr = parts[4] // "58%"
           const percent = parseInt(capacityStr.replace('%', ''), 10)
           const totalGb = totalKb / (1024 * 1024)
-          return { totalGb, percent }
+          return {
+            totalGb: Number(totalGb.toFixed(2)),
+            percent
+          }
         }
       }
     } catch {
